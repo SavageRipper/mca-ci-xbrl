@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MCA C&I XBRL Studio</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f5f7fb;color:#172033}
+header{background:#16213e;color:#fff;padding:18px 20px}
+main{max-width:1050px;margin:auto;padding:16px}
+.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 12px #0001}
+button{border:0;border-radius:10px;padding:11px 15px;margin:5px;background:#16213e;color:#fff;font-weight:600}
+button.secondary{background:#e9edf5;color:#172033}
+input,textarea,select{width:100%;box-sizing:border-box;padding:11px;border:1px solid #ccd3df;border-radius:9px;margin:5px 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#eaf0ff;margin:3px}
+.error{background:#fff0f0;border-left:4px solid #c62828;padding:10px;margin:8px 0}
+.ok{background:#eefaf1;border-left:4px solid #2e7d32;padding:10px;margin:8px 0}
+.small{font-size:13px;color:#657084}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header><strong>MCA C&I XBRL Studio</strong><div class="small" style="color:#dce5ff">iPad/Safari • MCA V3 • browser-side data processing</div></header>
+<main>
+<div class="card">
+<h2>Filing Setup</h2>
+<div class="grid">
+<label>Company Name<input id="company"></label>
+<label>CIN<input id="cin"></label>
+<label>Current FY end<input id="fy" type="date"></label>
+<label>Previous FY end<input id="py" type="date"></label>
+</div>
+<div><span class="badge">MCA V3: https://www.mca.gov.in/V3XBRL/</span><span class="badge">C&I</span></div>
+</div>
+
+<div class="card">
+<h2>Save / Restore Project</h2>
+<p class="small">Save your current input data to a file on the iPad. The saved project stays under your control and is not uploaded to GitHub.</p>
+<button onclick="saveProject()">Save Data</button>
+<button class="secondary" onclick="document.getElementById('project').click()">Restore Saved Data</button>
+<input id="project" class="hidden" type="file" accept=".json">
+</div>
+
+<div class="card">
+<h2>Import Previous-Year XML</h2>
+<p class="small">Choose a previous MCA XBRL/XML file from Files. Processing occurs in the browser. Imported facts are added to the review table; unmatched facts are reported instead of silently discarded.</p>
+<input id="xmlfile" type="file" accept=".xml,.xbrl">
+<button onclick="importXML()">Import Previous XML</button>
+<div id="xmlstatus"></div>
+</div>
+
+<div class="card">
+<h2>Facts / Tagging Workbench</h2>
+<div class="grid">
+<label>Concept<input id="concept" placeholder="e.g. TradeReceivables"></label>
+<label>Context ID<input id="context" placeholder="ctx1"></label>
+<label>Unit<input id="unit" placeholder="INR"></label>
+<label>Value<input id="value"></label>
+</div>
+<button onclick="addFact()">Add Fact</button>
+<div id="facts"></div>
+</div>
+
+<div class="card">
+<h2>Pre-scrutiny</h2>
+<button onclick="prescrutiny()">Run Pre-scrutiny</button>
+<button class="secondary" onclick="downloadCSV()">Download Error Report</button>
+<div id="report"></div>
+</div>
+
+<div class="card">
+<h2>Generate XML</h2>
+<button onclick="generateXML()">Generate / Download XML</button>
+<div id="xmlresult"></div>
+</div>
+</main>
+<script>
+let state={company:"",cin:"",fy:"",py:"",facts:[],issues:[]};
+const $=id=>document.getElementById(id);
+function sync(){state.company=$("company").value;state.cin=$("cin").value;state.fy=$("fy").value;state.py=$("py").value;renderFacts()}
+function renderFacts(){ $("facts").innerHTML=state.facts.map((f,i)=>`<div class="badge">${i+1}. ${esc(f.concept)} | ${esc(f.context)} | ${esc(f.unit||"—")} | ${esc(f.value)}</div>`).join("")}
+function esc(s){return String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",""":"&quot;"}[m]))}
+function addFact(){sync();state.facts.push({concept:$("concept").value.trim(),context:$("context").value.trim(),unit:$("unit").value.trim(),value:$("value").value});$("concept").value=$("context").value=$("unit").value=$("value").value="";renderFacts()}
+function saveProject(){sync();let blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=(state.cin||"MCA_XBRL")+"_project.json";a.click();URL.revokeObjectURL(a.href)}
+$("project").onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{state=JSON.parse(r.result);$("company").value=state.company||"";$("cin").value=state.cin||"";$("fy").value=state.fy||"";$("py").value=state.py||"";renderFacts()}catch{alert("Invalid project file")}};r.readAsText(f)}
+function importXML(){let f=$("xmlfile").files[0];if(!f){alert("Select an XML/XBRL file first.");return}let r=new FileReader();r.onload=()=>{try{let doc=new DOMParser().parseFromString(r.result,"application/xml");if(doc.querySelector("parsererror"))throw Error("Invalid XML");let all=[...doc.documentElement.children].filter(x=>!["schemaRef","context","unit"].includes(x.localName));let imported=0;for(let el of all){let context=el.getAttribute("contextRef");if(!context)continue;state.facts.push({concept:el.localName,context,unit:el.getAttribute("unitRef")||"",value:el.textContent.trim(),source:"previous-year XML"});imported++}renderFacts();$("xmlstatus").innerHTML=`<div class="ok">Imported ${imported} facts for review. Save the project before continuing.</div>`}catch(e){$("xmlstatus").innerHTML=`<div class="error">XML import failed: ${esc(e.message)}</div>`}};r.readAsText(f)}
+function prescrutiny(){sync();let issues=[];let seen=new Set();for(let [i,f] of state.facts.entries()){if(!f.concept)issues.push({row:i+1,msg:"Missing taxonomy concept"});if(!f.context)issues.push({row:i+1,msg:"Missing context"});if(!f.unit&&f.value!=="")issues.push({row:i+1,msg:"Unit missing for a non-empty fact"});let k=f.concept+"|"+f.context;if(seen.has(k))issues.push({row:i+1,msg:"Duplicate concept + context fact"});seen.add(k)}if(!state.cin)issues.push({row:"Company",msg:"CIN not entered"});state.issues=issues;renderReport()}
+function renderReport(){ $("report").innerHTML=state.issues.length?state.issues.map(x=>`<div class="error"><strong>${esc(x.row)}</strong> — ${esc(x.msg)}</div>`).join(""):'<div class="ok">No prototype pre-scrutiny errors detected.</div>'}
+function downloadCSV(){let rows=[["Row","Issue"],...state.issues.map(x=>[x.row,x.msg])];let csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="PreScrutiny_Report.csv";a.click()}
+function generateXML(){prescrutiny();if(state.issues.length){$("xmlresult").innerHTML='<div class="error">Correct pre-scrutiny errors before generating the prototype XML.</div>';return}let ns="http://www.mca.gov.in/2016/CNI";let out='<?xml version="1.0" encoding="UTF-8"?>\n<xbrl xmlns="'+ns+'" xmlns:xbrli="http://www.xbrl.org/2003/instance">\n';out+='<xbrli:context id="ctx1"><xbrli:entity><xbrli:identifier scheme="http://www.mca.gov.in/CIN">'+esc(state.cin)+'</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>'+esc(state.fy)+'</xbrli:instant></xbrli:period></xbrli:context>\n';for(let f of state.facts){out+=`<${f.concept} contextRef="${esc(f.context||"ctx1")}"${f.unit?` unitRef="${esc(f.unit)}"`:""}>${esc(f.value)}</${f.concept}>\n`}out+='</xbrl>';let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([out],{type:"application/xml"}));a.download="Final_XBRL_Prototype.xml";a.click();$("xmlresult").innerHTML='<div class="ok">Prototype XML generated. This is not yet MCA-filing-grade and must be validated with the official MCA validator.</div>'}
+</script>
+</body>
+</html>
